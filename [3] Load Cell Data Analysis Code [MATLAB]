@@ -1,0 +1,145 @@
+%% Load Cell Data Analysis
+
+% Program's Function:
+% (a) Read-in raw data collected by the micro-SD card 
+% (b) Apply the relevant equations to the raw data to produce meaningful plots 
+% (c) Format this data to reduce unwanted noise
+%   (i) Tank Mass Smoothing
+%   (ii) MFR Smoothing
+% (d) Plot the following graphs;   
+%     (i) Fuel Mass Flowrate v Time
+%     (ii) Fuel Tank Pressure v Time    
+%     (iii) Oxidiser Mass Flowrate v Time
+%     (iv) Oxidiser Tank Pressure v Time
+
+%% (a) Read-in raw data
+
+% RAW DATA '.txt' FORMAT [TIME (ms), FUEL TANK MASS (grams), OXIDISER  TANK MASS (grams)]
+
+Raw_Data_1 = fopen("Hot_fire.txt", 'rt');      % 'rt' means read text
+Raw_Data_2 = textscan(Raw_Data_1, '%f%f%f'); % reads in the data as an array, '%f' represents a single column of floating point number
+fclose(Raw_Data_1);
+Matlab_Data_1 = cell2mat(Raw_Data_2);        % converting cell array to a matrix
+
+
+%% (b) Apply the relevant equations to the raw data to produce meaningful plots
+
+MFR = zeros(length(Matlab_Data_1), 3);                                     % Defining the matrices to store data in
+MFR_smoothed = zeros(length(MFR), 3);
+T_Mass_smoothed = zeros(length(Matlab_Data_1), 3);
+
+for iD = 1:(length(Matlab_Data_1)-1)
+    MFR(iD, 1) = (Matlab_Data_1(iD+1,1) - Matlab_Data_1(iD,1));            % TIME STEP (secs)
+    MFR(iD, 2) = (Matlab_Data_1(iD+1,2) - Matlab_Data_1(iD,2))/MFR(iD, 1); % delta_M_FUEL (grams/millisec)
+    MFR(iD, 3) = (Matlab_Data_1(iD+1,3) - Matlab_Data_1(iD,3))/MFR(iD, 1); % delta_M_FUEL (grams/millisec)
+end 
+ 
+%% (c) Format this data to reduce unwanted noise
+
+% (i) Tank Mass Smoothing
+TM_values_averaged = 5; % Setting the number of values to be included in each dataset smoothing calculation
+
+for i = 1:length(T_Mass_smoothed) % ensuring the mean value is taken from the middle of the set of data values being considered
+    T_Mass_previous = i-TM_values_averaged;
+    T_Mass_subsequent = i+TM_values_averaged;
+    if T_Mass_previous < 1
+        T_Mass_previous = i;
+    elseif T_Mass_subsequent > length(T_Mass_smoothed)
+        T_Mass_subsequent = i;
+    end
+    T_Mass_smoothed(i, 2) = mean(Matlab_Data_1(T_Mass_previous:T_Mass_subsequent, 2)); % taking the average of a certain specified range of values, then assigning the current value to this
+    T_Mass_smoothed(i, 3) = mean(Matlab_Data_1(T_Mass_previous:T_Mass_subsequent, 3));
+end
+
+% (ii) MFR Smoothing
+MFR_values_averaged = 1;
+
+
+for i = 1:(length(MFR_smoothed)-MFR_values_averaged)
+    T_MFR_previous = i-MFR_values_averaged;
+    T_MFR_subsequent = i+MFR_values_averaged;
+    if T_MFR_previous < 1
+        T_MFR_previous = i;
+    elseif T_MFR_subsequent > length(T_Mass_smoothed)
+        T_MFR_subsequent = i;
+    end
+    MFR_smoothed(i, 2) = mean(MFR(T_MFR_previous:T_MFR_subsequent, 2));
+    MFR_smoothed(i, 3) = mean(MFR(T_MFR_previous:T_MFR_subsequent, 3));
+end
+
+%% (d) Plot the data
+
+
+firing_A = 281.4; % Time when 'firing' began
+firing_B = 283; % Time when 'firing' ended
+firing_C = 287.5; % Time when 'firing' ended
+data_begin = 280.5;
+data_end = 290.5;
+% data_end = Matlab_Data_1(end, 1)/1000;
+
+% RAW DATA: TANK MASSES v Time (millisecs)
+subplot(2,2,1)
+plot(Matlab_Data_1(:,1)/1000, Matlab_Data_1(:,2)/1000, 'r', 'linewidth', 0.8); % FUEL_Mass (g) v Time (s)
+hold on
+plot(Matlab_Data_1(:,1)/1000, Matlab_Data_1(:,3)/1000, 'b', 'linewidth', 0.8); % OXIDISER_Mass (g) v Time (s)
+
+xlim([data_begin data_end])                                                    % setting the x-axis plot limits
+% ylim([-2500 200])                                                % setting the y-axis plot limits
+plot([firing_A firing_A], [ylim], 'k--', 'Linewidth', 1) % drawing a vertical line to indicate the start of the firing
+plot([firing_B firing_B], [ylim], 'k--', 'Linewidth', 1)     % drawing a vertical line to indicate the end of the firing
+plot([firing_C firing_C], [ylim], 'k--', 'Linewidth', 1)     % drawing a vertical line to indicate the end of the firing
+title('RAW: Mass v Time');
+xlabel('Time [seconds]')
+ylabel('Tank Mass [kg]')
+% legend('Fuel','Oxidiser', 'Start/End')
+legend('Fuel','Oxidiser', 'Oxidiser/Fuel/End')
+
+% SMOOTHED DATA: TANK MASSES v Time (millisecs)
+subplot(2,2,2)
+plot(Matlab_Data_1(:,1)/1000, T_Mass_smoothed(:,2)/1000, 'r', 'linewidth', 0.8); % FUEL_Mass (g) v Time (s)
+hold on
+plot(Matlab_Data_1(:,1)/1000, T_Mass_smoothed(:,3)/1000, 'b', 'linewidth', 0.8); % OXIDISER_Mass (g) v Time (s)
+
+xlim([data_begin data_end])      
+% ylim([-2500 200])
+plot([firing_A firing_A], [ylim], 'k--', 'Linewidth', 1)
+plot([firing_B firing_B], [ylim], 'k--', 'Linewidth', 1)
+plot([firing_C firing_C], [ylim], 'k--', 'Linewidth', 1)     % drawing a vertical line to indicate the end of the firing
+title('SMOOTHED: Mass v Time');
+xlabel('Time [seconds]')
+ylabel('Tank Mass [kg]')
+legend('Fuel','Oxidiser', 'Start/End')
+
+
+% RAW DATA: FUEL/OXIDISER MFRs v Time (secs)
+subplot(2,2,3)
+plot(Matlab_Data_1(:,1)/1000, -MFR(:, 2), 'r', 'linewidth', 0.5); % FUEL_MFR (g) v Time (s), flipping the MFR sign to give +ve values
+hold on
+plot(Matlab_Data_1(:,1)/1000, -MFR(:, 3), 'b', 'linewidth', 0.5); % OXIDISER_MFR (g) v Time (s), flipping the MFR sign to give +ve values
+
+xlim([data_begin data_end])
+% ylim([-0.4 1])
+plot([firing_A firing_A], [ylim], 'k--', 'Linewidth', 1)
+plot([firing_B firing_B], [ylim], 'k--', 'Linewidth', 1)
+plot([firing_C firing_C], [ylim], 'k--', 'Linewidth', 1)     % drawing a vertical line to indicate the end of the firing
+title('RAW: Mass Flowrate v Time');
+xlabel('Time [seconds]')
+ylabel('Mass Flowrate [kg/s]')
+legend('Fuel','Oxidiser', 'Start/End')
+
+
+% SMOOTHED DATA: FUEL/OXIDISER MFRs v Time (secs)
+subplot(2,2,4)
+plot(Matlab_Data_1(:,1:1)/1000, -MFR_smoothed(:,2), 'r', 'linewidth', 0.8); % FUEL_MFR (g) v Time (s)
+hold on
+plot(Matlab_Data_1(:,1:1)/1000, -MFR_smoothed(:,3), 'b', 'linewidth', 0.8); % OXIDISER_MFR (g) v Time (s)
+
+xlim([data_begin data_end])
+ylim([0 0.6])
+plot([firing_A firing_A], [ylim], 'k--', 'Linewidth', 1)
+plot([firing_B firing_B], [ylim], 'k--', 'Linewidth', 1)
+plot([firing_C firing_C], [ylim], 'k--', 'Linewidth', 1)     % drawing a vertical line to indicate the end of the firing
+title('SMOOTHED: Mass Flowrate v Time');
+xlabel('Time [seconds]')
+ylabel('Mass Flowrate [kg/s]')
+legend('Fuel','Oxidiser', 'Oxidiser/Fuel/End')
