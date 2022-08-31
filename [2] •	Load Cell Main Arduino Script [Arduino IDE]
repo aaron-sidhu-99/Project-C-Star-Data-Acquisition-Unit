@@ -1,0 +1,160 @@
+#include <HX711_ADC.h>
+#if defined(ESP8266)|| defined(ESP32) || defined(AVR)
+#include <EEPROM.h>
+#include <SPI.h>
+#include <SD.h>
+#endif
+#define FILE_BASE_NAME "Data" // Base name must be six characters or less for short file names.
+
+const uint8_t CS_PIN = 4;
+
+File file;
+
+const uint8_t BASE_NAME_SIZE = sizeof(FILE_BASE_NAME) - 1;
+char fileName[] = FILE_BASE_NAME "00.txt";
+
+
+// Setting Load Cell Data Pins const int HX711_dout_ 1= 6; //mcu > HX711 dout pin
+const int HX711_dout_1 = 6; //mcu > HX711 no 1 dout pin [FUEL]
+const int HX711_sck_1 = 7; //mcu > HX711 sck pin [FUEL]
+const int HX711_dout_2 = 3; //mcu > HX711 no 2 dout pin [OXIDISER]
+const int HX711_sck_2 = 5; //mcu > HX711 no 2 sck pin [OXIDISER]
+
+// HX711 constructor:
+HX711_ADC LoadCell_1(HX711_dout_1, HX711_sck_1); //HX711 1 = FUEL
+HX711_ADC LoadCell_2(HX711_dout_2, HX711_sck_2); //HX711 2 = OXIDISER
+
+const int calVal_eepromAddress_1 = 0; // eeprom adress for calibration value load cell 1 (4 bytes)
+const int calVal_eepromAddress_2 = 4; // eeprom adress for calibration value load cell 2 (4 bytes)
+unsigned long t = 0;
+
+
+void setup() {
+  
+  // LOAD CELL SETUP //////////////////////////////////////////////////////////////////////////////////////////////////
+  Serial.begin(115200); 
+  delay(10);
+  Serial.println("Starting...");
+
+  float calibrationValue_1; // calibration value load cell 1
+  float calibrationValue_2; // calibration value load cell 2
+
+  calibrationValue_1 = 101.84; // [FUEL LC]
+  calibrationValue_2 = 103.20; // [OXIDISER LC]
+  
+#if defined(ESP8266) || defined(ESP32)
+#endif
+
+  LoadCell_1.begin();
+  LoadCell_2.begin();
+  //LoadCell_1.setReverseOutput();
+  //LoadCell_2.setReverseOutput();
+  unsigned long stabilizingtime = 2000; // tare preciscion can be improved by adding a few seconds of stabilizing time
+  boolean _tare = true; //set this to false if you don't want tare to be performed in the next step
+  byte loadcell_1_rdy = 0;
+  byte loadcell_2_rdy = 0;
+  while ((loadcell_1_rdy + loadcell_2_rdy) < 2) { //run startup, stabilization and tare, both modules simultaniously
+    if (!loadcell_1_rdy) loadcell_1_rdy = LoadCell_1.startMultiple(stabilizingtime, _tare);
+    if (!loadcell_2_rdy) loadcell_2_rdy = LoadCell_2.startMultiple(stabilizingtime, _tare);
+  }
+  if (LoadCell_1.getTareTimeoutFlag()) {
+    Serial.println(F("Timeout, check MCU>HX711 no.1 wiring and pin designations"));
+  }
+  if (LoadCell_2.getTareTimeoutFlag()) {
+    Serial.println(F("Timeout, check MCU>HX711 no.2 wiring and pin designations"));
+  }
+  LoadCell_1.setCalFactor(calibrationValue_1); // user set calibration value (float)
+  LoadCell_2.setCalFactor(calibrationValue_2); // user set calibration value (float)
+  Serial.println(F("Startup is complete"));
+  
+   // SD CARD SETUP //////////////////////////////////////////////////////////////////////////////////////////////////
+  Serial.println(F("Initialising SD Card..."));
+  if (!SD.begin(CS_PIN)) {
+    Serial.println(F("Initialising MicroSD Card: Failed"));
+    return;
+ }
+
+   while (SD.exists(fileName)) {
+    if (fileName[BASE_NAME_SIZE + 1] != '9') {
+      fileName[BASE_NAME_SIZE + 1]++;
+    } else if (fileName[BASE_NAME_SIZE] != '9') {
+      fileName[BASE_NAME_SIZE + 1] = '0';
+      fileName[BASE_NAME_SIZE]++;
+    } else {
+      Serial.println(F("Can't create file name"));
+      return;
+    }
+  }
+  
+  file = SD.open(fileName, FILE_WRITE);  // creates the .txt file to store the data in, should be a string, length < 12
+  if (!file) {
+    Serial.println(F("Open failed"));
+    return;
+  }
+  Serial.print(F("Opened: "));
+  Serial.println(fileName);
+  file.close();
+
+}
+
+void loop() {
+  static boolean newDataReady = 0;
+  const int serialPrintInterval = 0; // Increase value to slow down serial print activity
+
+  // delay(1000); // Gives time to walk to a safe disctance prior to engine firing
+
+  // LOAD CELL SECTION
+  if (LoadCell_1.update()) newDataReady = true;    // check for new data/start next conversion:
+  LoadCell_2.update();
+
+  // Get a smoothed value from data set
+  if ((newDataReady)) {
+    if (millis() > t + serialPrintInterval) {
+      float a = LoadCell_1.getData();
+      float b = LoadCell_2.getData();
+      Serial.println(F("LC_1_FUEL: "));
+      Serial.println(a);
+      Serial.println(F("LC_2_OXIDISER: "));
+      Serial.println(b);
+      newDataReady = 0;
+      t = millis();
+
+
+       // WRITING DATA ONTO SD CARD 
+        if(SD.exists(fileName)) {
+            Serial.println("File Exists!");
+            file = SD.open(fileName, FILE_WRITE);
+            
+            if (file) {
+              Serial.println(F("File CAN Be Written To!"));
+              file.println(String(millis()) + " " + float(a) + " " + float(b)); // Time since startup (ms) / LC1_Fuel Data (grams) / LC2_Oxidiser Data (grams) / 
+              file.close();
+            } else {
+                Serial.println(F("File CANNOT Be Written To!")); }
+        } else {
+            Serial.println(F("File Does NOT Exist!")); }
+      }
+       
+  }
+
+// receive command from serial terminal, send 't' to initiate tare operation:
+  if (Serial.available() > 0) {
+    char inByte = Serial.read();
+    if (inByte == 't') {
+      LoadCell_1.tareNoDelay();
+      LoadCell_2.tareNoDelay();
+    }
+  }
+
+  //check if last tare operation is complete
+  if (LoadCell_1.getTareStatus() == true) {
+    Serial.println(F("Tare load cell 1 complete"));
+  }
+  if (LoadCell_2.getTareStatus() == true) {
+    Serial.println(F("Tare load cell 2 complete"));
+  }
+  
+   // delay(100);
+   
+
+}
